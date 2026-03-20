@@ -4,7 +4,7 @@ A .NET tool to enumerate AppLocker policies, detect PowerShell Constrained Langu
 
 > **Note:** This tool assumes you already have execution from an AppLocker-allowed path. It is primarily an **AppLocker recon and CLM bypass** tool — not an initial execution bypass. To get initial execution, use `MSBuild.exe` (built-in, always allowed) or copy the binary to a known allowed path such as `C:\Windows\Temp`.
 
-> **For authorized penetration testing and red team engagements only.**
+> **For Educational Purpose**
 
 ---
 
