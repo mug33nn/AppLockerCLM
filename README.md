@@ -22,6 +22,8 @@ Requires Visual Studio 2022 / MSBuild and .NET Framework 4.7.2.
 
 ```
 build.bat
+Or
+powershell -Command "& 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' 'C:\Users\<>\source\AppLockerCLM\AppLockerCLM.csproj' /p:Configuration=Release /v:minimal /nologo; exit $LASTEXITCODE" 2>&1
 ```
 
 Output: `bin\Release\AppLockerCLM.exe` (x64)
