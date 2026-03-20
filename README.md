@@ -1,6 +1,6 @@
 # AppLockerCLM
 
-A .NET tool for red teamers to enumerate AppLocker policies, detect PowerShell Constrained Language Mode (CLM), and execute payloads once inside an allowed path on locked-down Windows systems.
+A .NET tool to enumerate AppLocker policies, detect PowerShell Constrained Language Mode (CLM), and execute payloads once inside an allowed path on locked-down Windows systems.
 
 > **Note:** This tool assumes you already have execution from an AppLocker-allowed path. It is primarily an **AppLocker recon and CLM bypass** tool — not an initial execution bypass. To get initial execution, use `MSBuild.exe` (built-in, always allowed) or copy the binary to a known allowed path such as `C:\Windows\Temp`.
 
