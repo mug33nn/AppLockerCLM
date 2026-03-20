@@ -19,6 +19,7 @@ Additional bypass methods are included for environments where the binary itself 
 ## Build
 
 Requires Visual Studio 2022 / MSBuild and .NET Framework 4.7.2.
+Restore NuGet packages (downloads System.Management.Automation.dll)
 
 ```
 build.bat
