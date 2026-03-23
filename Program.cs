@@ -739,10 +739,6 @@ EXAMPLES:
                 @"C:\Windows\System32\Tasks",
                 @"C:\Windows\SysWOW64\Tasks",
                 @"C:\Windows\debug\WIA",
-                Environment.GetEnvironmentVariable("TEMP") ?? "",
-                Environment.GetEnvironmentVariable("TMP") ?? "",
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             });
 
             int found = 0;
@@ -754,7 +750,7 @@ EXAMPLES:
                 try
                 {
                     if (!Directory.Exists(path)) continue;
-                    if (IsWritable(path))
+                    if (IsWritable(path) && !IsBlockedByDenyRule(path, policy))
                     {
                         Good("[WRITABLE] " + path);
                         found++;
@@ -765,7 +761,7 @@ EXAMPLES:
                     {
                         try
                         {
-                            if (seen.Add(sub) && IsWritable(sub))
+                            if (seen.Add(sub) && IsWritable(sub) && !IsBlockedByDenyRule(sub, policy))
                             {
                                 Good("[WRITABLE] " + sub);
                                 found++;
@@ -832,10 +828,34 @@ EXAMPLES:
             return string.IsNullOrEmpty(path) ? null : path;
         }
 
+        static bool IsBlockedByDenyRule(string path, AppLockerPolicy policy)
+        {
+            foreach (var rule in policy.Rules.Where(r => r.Action == "Deny" && r.RuleType == "FilePathRule"))
+            {
+                foreach (var rulePath in rule.Paths)
+                {
+                    try
+                    {
+                        string expanded = ExpandAppLockerPath(rulePath);
+                        string dir = StripToDirectory(expanded);
+                        if (!string.IsNullOrEmpty(dir) &&
+                            path.StartsWith(dir, StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                    catch { }
+                }
+            }
+            return false;
+        }
+
         static bool IsWritable(string dir)
         {
             try
             {
+                // Must be able to list the directory — write-only dirs (e.g. C:\Windows\System32\Tasks)
+                // allow file creation but deny listing, making them impractical for dropping payloads
+                Directory.GetFiles(dir);
+
                 string tmp = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".tmp");
                 using (File.Create(tmp, 1, FileOptions.DeleteOnClose)) { }
                 return true;
